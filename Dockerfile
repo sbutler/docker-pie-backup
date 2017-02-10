@@ -46,6 +46,8 @@ RUN set -xe \
     && pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt \
     && mkdir /data
 
+VOLUME /data
+
 ENV AWS_ACCESS_KEY_ID           ""
 ENV AWS_SECRET_ACCESS_KEY       ""
 ENV AWS_DEFAULT_REGION          ""
