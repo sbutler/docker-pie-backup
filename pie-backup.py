@@ -201,7 +201,7 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
     logger.info("Executing: " + sh_cmd)
     ret = None
     if not dry_run:
-        ret = subprocess.run(sh_cmd, shell=True)
+        ret = subprocess.call(sh_cmd, shell=True)
 
     return ret
 
@@ -216,7 +216,4 @@ else:
     full_snar_file, full_snar_dt = download_full_snar()
 
 upload_ret = upload_tar(full_snar_file, full_snar_dt, dry_run=args.dry_run)
-if upload_ret is None:
-    sys.exit(1)
-else:
-    sys.exit(upload_ret.returncode)
+sys.exit(1 if upload_ret is None else upload_ret)
