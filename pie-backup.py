@@ -39,8 +39,9 @@ import os
 from pytz import timezone
 import re
 import shlex
+import subprocess
 import sys
-from tempfile import mkstemp
+from tempfile import NamedTemporaryFile
 import time
 
 BACKUP_FULL_WINDOW = int(os.environ.get('PIE_BACKUP_FULL_WINDOW', '30'))
@@ -124,14 +125,18 @@ def download_full_snar():
     if snar_files:
         obj = snar_files[0]
 
-        f, snar_file = mkstemp(prefix='pie-backup-{0:%Y%m%d%H%M%S}.'.format(obj['full_date']), suffix='.snar')
-        f = os.fdopen(f, mode='wb')
-        logger.debug("Full SNAR path: " + snar_file)
+        f = NamedTemporaryFile(
+            mode='w+b',
+            prefix='pie-backup-{0:%Y%m%d%H%M%S}.'.format(obj['full_date']),
+            suffix='.snar',
+        )
+        logger.debug("Full SNAR path: " + f.name)
 
         bucket.download_fileobj(obj['key'], f)
-        f.close()
+        f.flush()
+        f.seek(0, os.SEEK_SET)
 
-        return snar_file, obj['full_date']
+        return f, obj['full_date']
     else:
         return None, None
 
@@ -169,8 +174,7 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
     remote_prefix = "s3://" + BACKUP_S3_BUCKET + "/" + os.path.join(BACKUP_S3_PREFIX, local_now.strftime("%Y/%m"))
     if full_backup:
         prefix = "{0:%Y%m%d%H%M%S}".format(local_now)
-        f, local_snar_file = mkstemp(prefix='pie-backup-{0}.'.format(prefix), suffix='.snar')
-        os.close(f)
+        local_snar_file = NamedTemporaryFile(prefix='pie-backup-{0}.'.format(prefix), suffix='.snar')
     else:
         prefix = "{0:%Y%m%d%H%M%S}-{1:%Y%m%d%H%M%S}".format(full_snar_dt, local_now)
         local_snar_file = full_snar_file
@@ -185,8 +189,8 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
             shlex.quote(BACKUP_KMS_KEY_ID)
         )
 
-    bash_cmd = "tar --create --gzip --verbose --file=- --listed-incremental={local_snar} --directory={source} {options} . | aws s3 cp {kms_options} - {remote_tar} && aws s3 cp {kms_options} {local_snar} {remote_snar}".format(
-        local_snar=shlex.quote(local_snar_file),
+    sh_cmd = "tar --create --gzip --verbose --file=- --listed-incremental={local_snar} --directory={source} {options} . | aws s3 cp {kms_options} - {remote_tar} && aws s3 cp {kms_options} {local_snar} {remote_snar}".format(
+        local_snar=shlex.quote(local_snar_file.name),
         remote_tar=shlex.quote(remote_tar_file),
         remote_snar=shlex.quote(remote_snar_file),
         options=TAR_OPTIONS,
@@ -194,9 +198,12 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
         kms_options=kms_options,
     )
 
-    logger.info("Executing: " + bash_cmd)
+    logger.info("Executing: " + sh_cmd)
+    ret = None
     if not dry_run:
-        os.execv('/bin/bash', ['bash', '-c', bash_cmd])
+        ret = subprocess.run(sh_cmd, shell=True)
+
+    return ret
 
 args = parse_args()
 if args.debug:
@@ -208,4 +215,8 @@ if args.full:
 else:
     full_snar_file, full_snar_dt = download_full_snar()
 
-upload_tar(full_snar_file, full_snar_dt, dry_run=args.dry_run)
+upload_ret = upload_tar(full_snar_file, full_snar_dt, dry_run=args.dry_run)
+if upload_ret is None:
+    sys.exit(1)
+else:
+    sys.exit(upload_ret.returncode)

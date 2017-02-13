@@ -32,8 +32,6 @@
 FROM sbutler/pie-base:latest
 
 COPY requirements.txt /tmp
-COPY pie-backup.py /usr/local/bin
-
 RUN set -xe \
     && apt-get update && apt-get install -y \
         curl \
@@ -45,6 +43,8 @@ RUN set -xe \
     && python3 /tmp/get-pip.py && rm /tmp/get-pip.py \
     && pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt \
     && mkdir /data
+
+COPY pie-backup.py /usr/local/bin
 
 VOLUME /data
 
