@@ -63,6 +63,7 @@ local_tz = timezone(BACKUP_TZ)
 now = datetime.now()
 
 rsrc_s3 = boto3.resource('s3')
+clnt_s3 = boto3.client('s3')
 bucket = rsrc_s3.Bucket(BACKUP_S3_BUCKET)
 
 def daterange(begin, end, **kwargs):
@@ -189,24 +190,36 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
             shlex.quote(BACKUP_KMS_KEY_ID)
         )
 
-    bash_cmd = (
-        'tar --create --gzip --verbose --file=- --listed-incremental={local_snar} --directory={source} {options} . | ' +
-        'aws s3 cp {kms_options} - {remote_tar}; ' +
-        'S=("${{PIPESTATUS[@]}}"); case "${{S[0]}}" in 0|1) exit ${{S[1]}};; *) exit ${{S[0]}};; esac'
-    ).format(
-        local_snar=shlex.quote(local_snar_file.name),
-        remote_tar=shlex.quote(remote_tar_file),
-        options=TAR_OPTIONS,
-        source=shlex.quote(BACKUP_SOURCE),
-        kms_options=kms_options,
-    )
+    class BashException(Exception):
+        """ Exception to throw when the bash command fails. """
+        def __init__(self, returncode, message=None):
+            if not message:
+                message = "Bash script returned {0}".format(returncode)
+
+            super(BashException, self).__init__(message)
+
+            self.returncode = returncode
 
     ret = None
-    logger.info("Executing: " + bash_cmd)
-    if not dry_run:
-        ret = subprocess.call(["/bin/bash", "-c", bash_cmd])
+    try:
+        bash_cmd = (
+            'tar --create --gzip --verbose --file=- --listed-incremental={local_snar} --directory={source} {options} . | ' +
+            'aws s3 cp {kms_options} - {remote_tar}; ' +
+            'S=("${{PIPESTATUS[@]}}"); case "${{S[0]}}" in 0|1) exit ${{S[1]}};; *) exit ${{S[0]}};; esac'
+        ).format(
+            local_snar=shlex.quote(local_snar_file.name),
+            remote_tar=shlex.quote(remote_tar_file),
+            options=TAR_OPTIONS,
+            source=shlex.quote(BACKUP_SOURCE),
+            kms_options=kms_options,
+        )
 
-    if ret is None or ret == 0:
+        logger.info("Executing: " + bash_cmd)
+        if not dry_run:
+            ret = subprocess.call(["/bin/bash", "-c", bash_cmd])
+            if ret != 0:
+                raise BashException(ret)
+
         bash_cmd = 'aws s3 cp {kms_options} {local_snar} {remote_snar}'.format(
             local_snar=shlex.quote(local_snar_file.name),
             remote_snar=shlex.quote(remote_snar_file),
@@ -216,8 +229,11 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
         logger.info("Executing: " + bash_cmd)
         if not dry_run:
             ret = subprocess.call(["/bin/bash", "-c", bash_cmd])
+            if ret != 0:
+                raise BashException(ret)
+    except:
+        logger.exception("An error occured uploading the backups to AWS")
 
-    if not (ret is None or ret == 0):
         # Some error occured. Try to delete the files we uploaded
         try:
             bucket.delete_objects(
@@ -226,8 +242,7 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
                         { 'Key': remote_tar_file },
                         { 'Key': remote_snar_file },
                     ],
-                    'Quiet': True,
-                }
+                },
             )
         except:
             logger.exception("Unable to cleanup remote files: " + '; '.join(remote_tar_file, remote_snar_file))
