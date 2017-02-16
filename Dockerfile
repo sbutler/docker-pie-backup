@@ -53,7 +53,7 @@ ENV AWS_SECRET_ACCESS_KEY       ""
 ENV AWS_DEFAULT_REGION          ""
 
 # How far back (in days) to search for a recent full backup
-ENV PIE_BACKUP_FULL_WINDOW      30
+ENV PIE_BACKUP_FULL_WINDOW      6
 # If present, will encrypt the backups using KMS
 ENV PIE_BACKUP_KMS_KEY_ID       ""
 # Which bucket to backup to

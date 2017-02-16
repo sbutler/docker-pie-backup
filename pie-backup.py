@@ -44,7 +44,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 
-BACKUP_FULL_WINDOW = int(os.environ.get('PIE_BACKUP_FULL_WINDOW', '30'))
+BACKUP_FULL_WINDOW = int(os.environ.get('PIE_BACKUP_FULL_WINDOW', '6'))
 BACKUP_KMS_KEY_ID = os.environ.get('PIE_BACKUP_KMS_KEY_ID', None)
 BACKUP_S3_BUCKET = os.environ['PIE_BACKUP_S3_BUCKET']
 BACKUP_S3_PREFIX = os.environ.get('PIE_BACKUP_S3_PREFIX', '')
