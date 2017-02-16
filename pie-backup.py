@@ -172,7 +172,8 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
     full_backup = not (full_snar_file and full_snar_dt)
     local_now = local_tz.localize(now)
 
-    remote_prefix = "s3://" + BACKUP_S3_BUCKET + "/" + os.path.join(BACKUP_S3_PREFIX, local_now.strftime("%Y/%m"))
+    remote_key_prefix = os.path.join(BACKUP_S3_PREFIX, local_now.strftime("%Y/%m"))
+    remote_url_prefix = "s3://" + BACKUP_S3_BUCKET + "/"
     if full_backup:
         prefix = "{0:%Y%m%d%H%M%S}".format(local_now)
         local_snar_file = NamedTemporaryFile(prefix='pie-backup-{0}.'.format(prefix), suffix='.snar')
@@ -180,9 +181,13 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
         prefix = "{0:%Y%m%d%H%M%S}-{1:%Y%m%d%H%M%S}".format(full_snar_dt, local_now)
         local_snar_file = full_snar_file
 
-    remote_prefix = os.path.join(remote_prefix, prefix)
-    remote_tar_file = remote_prefix + ".tar.gz"
-    remote_snar_file = remote_prefix + ".snar"
+    remote_key_prefix = os.path.join(remote_key_prefix, prefix)
+
+    remote_tar_key = remote_key_prefix + ".tar.gz"
+    remote_tar_url = remote_url_prefix + remote_tar_key
+
+    remote_snar_key = remote_key_prefix + ".snar"
+    remote_snar_url = remote_url_prefix + remote_snar_key
 
     kms_options = ''
     if BACKUP_KMS_KEY_ID:
@@ -190,7 +195,7 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
             shlex.quote(BACKUP_KMS_KEY_ID)
         )
 
-    class BashException(Exception):
+    class _BashException(Exception):
         """ Exception to throw when the bash command fails. """
         def __init__(self, returncode, message=None):
             if not message:
@@ -200,6 +205,32 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
 
             self.returncode = returncode
 
+    def _tag_backuptype(key, tag_value):
+        """ Tag an S3 object with the BackupType value. """
+        tries = 6
+        while tries > 0:
+            try:
+                clnt_s3.put_object_tagging(
+                    Bucket=BACKUP_S3_BUCKET,
+                    Key=key,
+                    Tagging={
+                        'TagSet': [
+                            {
+                                'Key': 'BackupType',
+                                'Value': tag_value,
+                            },
+                        ],
+                    },
+                )
+            except:
+                tries -= 1
+                if tries <= 0:
+                    raise
+                else:
+                    time.sleep(10)
+            else:
+                break
+
     ret = None
     try:
         bash_cmd = (
@@ -208,7 +239,7 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
             'S=("${{PIPESTATUS[@]}}"); case "${{S[0]}}" in 0|1) exit ${{S[1]}};; *) exit ${{S[0]}};; esac'
         ).format(
             local_snar=shlex.quote(local_snar_file.name),
-            remote_tar=shlex.quote(remote_tar_file),
+            remote_tar=shlex.quote(remote_tar_url),
             options=TAR_OPTIONS,
             source=shlex.quote(BACKUP_SOURCE),
             kms_options=kms_options,
@@ -218,11 +249,13 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
         if not dry_run:
             ret = subprocess.call(["/bin/bash", "-c", bash_cmd])
             if ret != 0:
-                raise BashException(ret)
+                raise _BashException(ret)
+            _tag_backuptype(remote_tar_key, 'Full-TAR' if full_backup else 'Incr-TAR')
+
 
         bash_cmd = 'aws s3 cp {kms_options} {local_snar} {remote_snar}'.format(
             local_snar=shlex.quote(local_snar_file.name),
-            remote_snar=shlex.quote(remote_snar_file),
+            remote_snar=shlex.quote(remote_snar_url),
             kms_options=kms_options,
         )
 
@@ -230,7 +263,8 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
         if not dry_run:
             ret = subprocess.call(["/bin/bash", "-c", bash_cmd])
             if ret != 0:
-                raise BashException(ret)
+                raise _BashException(ret)
+            _tag_backuptype(remote_snar_key, 'Full-SNAR' if full_backup else 'Incr-SNAR')
     except:
         logger.exception("An error occured uploading the backups to AWS")
 
@@ -239,13 +273,13 @@ def upload_tar(full_snar_file, full_snar_dt, dry_run):
             bucket.delete_objects(
                 Delete={
                     'Objects': [
-                        { 'Key': remote_tar_file },
-                        { 'Key': remote_snar_file },
+                        { 'Key': remote_tar_key },
+                        { 'Key': remote_snar_key },
                     ],
                 },
             )
         except:
-            logger.exception("Unable to cleanup remote files: " + '; '.join(remote_tar_file, remote_snar_file))
+            logger.exception("Unable to cleanup remote files: " + '; '.join(remote_tar_url, remote_snar_url))
 
     return ret
 
