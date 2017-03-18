@@ -48,10 +48,6 @@ COPY pie-backup.py /usr/local/bin
 
 VOLUME /data
 
-ENV AWS_ACCESS_KEY_ID           ""
-ENV AWS_SECRET_ACCESS_KEY       ""
-ENV AWS_DEFAULT_REGION          ""
-
 # How far back (in days) to search for a recent full backup
 ENV PIE_BACKUP_FULL_WINDOW      6
 # If present, will encrypt the backups using KMS
