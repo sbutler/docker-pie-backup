@@ -31,34 +31,21 @@
 # THE SOFTWARE.
 FROM sbutler/pie-base:latest
 
-COPY requirements.txt /tmp
 RUN set -xe \
     && apt-get update && apt-get install -y \
-        curl \
-        libyaml-0-2 \
-        python3 \
+        rsync \
         --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -o /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py \
-    && python3 /tmp/get-pip.py && rm /tmp/get-pip.py \
-    && pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt \
-    && mkdir /data
+    && mkdir /data-src /data-dst
 
-COPY pie-backup.py /usr/local/bin
+COPY pie-backup.sh /usr/local/bin
 
-VOLUME /data
+VOLUME /data-src
+VOLUME /data-dst
 
-# How far back (in days) to search for a recent full backup
-ENV PIE_BACKUP_FULL_WINDOW      6
-# If present, will encrypt the backups using KMS
-ENV PIE_BACKUP_KMS_KEY_ID       ""
-# Which bucket to backup to
-ENV PIE_BACKUP_S3_BUCKET        ""
-# Bucket key prefix to use (aka, subdirectory)
-ENV PIE_BACKUP_S3_PREFIX        ""
-# Timezone to use for timestamps
-ENV PIE_BACKUP_TZ               "America/Chicago"
-# Options to pass to the tar command (raw, as is)
-ENV PIE_TAR_OPTIONS             ""
+ENV PIE_BACKUP_SOURCE           "/data-src"
+ENV PIE_BACKUP_DESTINATION      "/data-dst"
+ENV PIE_BACKUP_INTERVAL         "daily"
+ENV PIE_BACKUP_RETAIN           7
 
-CMD ["/usr/local/bin/pie-backup.py"]
+CMD ["/usr/local/bin/pie-backup.sh"]
